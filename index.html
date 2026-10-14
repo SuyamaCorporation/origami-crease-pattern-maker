@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Origami Crease Pattern Step Builder</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  #canvas-container { touch-action: none; }
+  svg { cursor: crosshair; display: block; }
+  svg.select-mode { cursor: default; }
+  .crease-mountain { stroke: #ef4444; stroke-width: 2; fill: none; }
+  .crease-valley { stroke: #3b82f6; stroke-width: 2; fill: none; stroke-dasharray: 8 4; }
+  .crease-border { stroke: #6b7280; stroke-width: 2; fill: none; }
+  .crease-selected { stroke: #f59e0b !important; stroke-width: 3 !important; }
+  .crease-highlight { stroke-width: 4 !important; }
+  .snap-dot { fill: rgba(100,200,255,0.4); }
+</style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen flex flex-col items-center p-4">
+  <div class="w-full max-w-5xl">
+    <h1 class="text-2xl font-bold text-center mb-1 text-orange-400">Origami Crease Pattern Step Builder</h1>
+    <p class="text-center text-gray-400 text-sm mb-4">Draw fold lines on a square sheet — Mountain (red) or Valley (blue dashed)</p>
+
+    <div class="flex flex-col lg:flex-row gap-4">
+      <!-- Left controls -->
+      <div class="lg:w-56 flex flex-col gap-3">
+        <!-- Tool mode -->
+        <div class="bg-gray-900 rounded-lg p-3">
+          <div class="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">Fold Type</div>
+          <div class="flex flex-col gap-2">
+            <button id="btn-mountain" onclick="setTool('mountain')"
+              class="tool-btn px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-red-700 text-white border-2 border-red-400">
+              ─── Mountain Fold
+            </button>
+            <button id="btn-valley" onclick="setTool('valley')"
+              class="tool-btn px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-700 text-gray-300 border-2 border-transparent">
+              - - - Valley Fold
+            </button>
+          </div>
+        </div>
+
+        <!-- Mode -->
+        <div class="bg-gray-900 rounded-lg p-3">
+          <div class="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">Mode</div>
+          <div class="flex flex-col gap-2">
+            <button id="btn-draw" onclick="setMode('draw')"
+              class="px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-cyan-700 text-white border-2 border-cyan-400">
+              Draw
+            </button>
+            <button id="btn-select" onclick="setMode('select')"
+              class="px-3 py-2 rounded-lg text-sm font-medium transition-colors bg-gray-700 text-gray-300 border-2 border-transparent">
+              Select (Del)
+            </button>
+          </div>
+        </div>
+
+        <!-- Snap -->
+        <div class="bg-gray-900 rounded-lg p-3">
+          <div class="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">Snap Grid</div>
+          <select id="snap-select" onchange="setSnap(this.value)"
+            class="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm">
+            <option value="4">1/4</option>
+            <option value="8" selected>1/8</option>
+            <option value="16">1/16</option>
+            <option value="0">Off</option>
+          </select>
+        </div>
+
+        <!-- Animation -->
+        <div class="bg-gray-900 rounded-lg p-3">
+          <div class="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">Step Animation</div>
+          <button onclick="animateSteps()"
+            class="w-full px-3 py-2 bg-purple-700 hover:bg-purple-600 rounded-lg text-sm font-medium transition-colors mb-2">
+            ▶ Play Steps
+          </button>
+          <button onclick="stopAnimation()"
+            class="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors mb-2">
+            ■ Stop
+          </button>
+          <div class="text-xs text-gray-500" id="anim-status">Idle</div>
+        </div>
+
+        <!-- Presets -->
+        <div class="bg-gray-900 rounded-lg p-3">
+          <div class="text-xs text-gray-400 mb-2 font-semibold uppercase tracking-wide">Presets</div>
+          <button onclick="loadCrane()"
+            class="w-full px-3 py-2 bg-orange-800 hover:bg-orange-700 rounded-lg text-sm font-medium transition-colors mb-2">
+            🦢 Load Crane CP
+          </button>
+          <button onclick="clearAll()"
+            class="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors">
+            Clear All
+          </button>
+        </div>
+
+        <!-- Download -->
+        <button onclick="downloadSVG()"
+          class="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors">
+          ⬇ Download SVG
+        </button>
+
+        <!-- Stats -->
+        <div class="bg-gray-900 rounded-lg p-3 text-xs text-gray-400">
+          <div>Mountain: <span id="count-m" class="text-red-400 font-bold">0</span></div>
+          <div>Valley: <span id="count-v" class="text-blue-400 font-bold">0</span></div>
+          <div>Total: <span id="count-t" class="text-white font-bold">0</span></div>
+        </div>
+      </div>
+
+      <!-- SVG canvas -->
+      <div class="flex-1 flex flex-col items-center">
+        <div id="canvas-container" class="w-full" style="max-width:480px">
+          <svg id="cp-svg" viewBox="0 0 480 480" style="width:100%;background:#f9f5eb;border:2px solid #374151;border-radius:8px;">
+            <!-- Paper square border -->
+            <rect x="20" y="20" width="440" height="440" fill="#f9f5eb" stroke="#9ca3af" stroke-width="2"/>
+            <!-- Snap grid dots (generated by JS) -->
+            <g id="snap-dots"></g>
+            <!-- Crease lines -->
+            <g id="creases"></g>
+            <!-- Current drawing line -->
+            <line id="preview-line" x1="0" y1="0" x2="0" y2="0" stroke="#aaa" stroke-width="1.5" stroke-dasharray="4 3" opacity="0"/>
+          </svg>
+        </div>
+        <div class="mt-2 text-xs text-gray-500 text-center">
+          Click & drag to draw a fold line. Select mode + click line to select, Delete to remove.
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const svg = document.getElementById('cp-svg');
+const creasesG = document.getElementById('creases');
+const previewLine = document.getElementById('preview-line');
+
+const MARGIN = 20, SIZE = 440;
+let creases = []; // {id, x1,y1,x2,y2, type: 'mountain'|'valley'}
+let idCounter = 0;
+let tool = 'mountain';
+let editMode = 'draw';
+let snapDiv = 8;
+let drawing = false;
+let startPt = null;
+let selectedId = null;
+let animTimer = null;
+
+// Snap grid
+function setSnap(val) {
+  snapDiv = parseInt(val) || 0;
+  drawSnapDots();
+}
+
+function snapPt(x, y) {
+  if (!snapDiv) return { x, y };
+  const step = SIZE / snapDiv;
+  const sx = Math.round((x - MARGIN) / step) * step + MARGIN;
+  const sy = Math.round((y - MARGIN) / step) * step + MARGIN;
+  return {
+    x: Math.max(MARGIN, Math.min(MARGIN + SIZE, sx)),
+    y: Math.max(MARGIN, Math.min(MARGIN + SIZE, sy)),
+  };
+}
+
+function drawSnapDots() {
+  const g = document.getElementById('snap-dots');
+  g.innerHTML = '';
+  if (!snapDiv) return;
+  const step = SIZE / snapDiv;
+  for (let i = 0; i <= snapDiv; i++) {
+    for (let j = 0; j <= snapDiv; j++) {
+      const c = document.createElementNS(SVG_NS, 'circle');
+      c.setAttribute('cx', MARGIN + i * step);
+      c.setAttribute('cy', MARGIN + j * step);
+      c.setAttribute('r', '2');
+      c.setAttribute('fill', 'rgba(100,150,200,0.3)');
+      g.appendChild(c);
+    }
+  }
+}
+drawSnapDots();
+
+function getSVGPt(e) {
+  const rect = svg.getBoundingClientRect();
+  const clientX = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+  const clientY = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+  const scaleX = 480 / rect.width;
+  const scaleY = 480 / rect.height;
+  return snapPt((clientX - rect.left) * scaleX, (clientY - rect.top) * scaleY);
+}
+
+function clampToPaper(pt) {
+  return {
+    x: Math.max(MARGIN, Math.min(MARGIN + SIZE, pt.x)),
+    y: Math.max(MARGIN, Math.min(MARGIN + SIZE, pt.y)),
+  };
+}
+
+svg.addEventListener('mousedown', (e) => {
+  if (editMode === 'draw') {
+    drawing = true;
+    startPt = clampToPaper(getSVGPt(e));
+    previewLine.setAttribute('opacity', '1');
+    previewLine.setAttribute('x1', startPt.x);
+    previewLine.setAttribute('y1', startPt.y);
+    previewLine.setAttribute('x2', startPt.x);
+    previewLine.setAttribute('y2', startPt.y);
+    previewLine.setAttribute('stroke', tool === 'mountain' ? '#ef4444' : '#3b82f6');
+    if (tool === 'valley') previewLine.setAttribute('stroke-dasharray', '8 4');
+    else previewLine.removeAttribute('stroke-dasharray');
+  }
+});
+
+svg.addEventListener('mousemove', (e) => {
+  if (!drawing) return;
+  const pt = clampToPaper(getSVGPt(e));
+  previewLine.setAttribute('x2', pt.x);
+  previewLine.setAttribute('y2', pt.y);
+});
+
+svg.addEventListener('mouseup', (e) => {
+  if (!drawing) return;
+  drawing = false;
+  const endPt = clampToPaper(getSVGPt(e));
+  previewLine.setAttribute('opacity', '0');
+  const dx = endPt.x - startPt.x;
+  const dy = endPt.y - startPt.y;
+  if (Math.sqrt(dx * dx + dy * dy) < 8) return; // too short
+  addCrease(startPt.x, startPt.y, endPt.x, endPt.y, tool);
+});
+
+svg.addEventListener('mouseleave', () => {
+  if (drawing) {
+    drawing = false;
+    previewLine.setAttribute('opacity', '0');
+  }
+});
+
+function addCrease(x1, y1, x2, y2, type) {
+  const id = ++idCounter;
+  creases.push({ id, x1, y1, x2, y2, type });
+  renderCrease({ id, x1, y1, x2, y2, type });
+  updateCounts();
+}
+
+function renderCrease(c, highlight = false) {
+  const line = document.createElementNS(SVG_NS, 'line');
+  line.setAttribute('id', 'crease-' + c.id);
+  line.setAttribute('x1', c.x1); line.setAttribute('y1', c.y1);
+  line.setAttribute('x2', c.x2); line.setAttribute('y2', c.y2);
+  line.setAttribute('class', c.type === 'mountain' ? 'crease-mountain' : 'crease-valley');
+  if (highlight) line.classList.add('crease-highlight');
+  line.addEventListener('click', () => {
+    if (editMode === 'select') selectCrease(c.id);
+  });
+  creasesG.appendChild(line);
+}
+
+function selectCrease(id) {
+  // Deselect old
+  if (selectedId !== null) {
+    const old = document.getElementById('crease-' + selectedId);
+    if (old) old.classList.remove('crease-selected');
+  }
+  selectedId = id;
+  const el = document.getElementById('crease-' + id);
+  if (el) el.classList.add('crease-selected');
+}
+
+document.addEventListener('keydown', (e) => {
+  if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId !== null) {
+    deleteCrease(selectedId);
+    selectedId = null;
+  }
+});
+
+function deleteCrease(id) {
+  creases = creases.filter(c => c.id !== id);
+  const el = document.getElementById('crease-' + id);
+  if (el) el.remove();
+  updateCounts();
+}
+
+function updateCounts() {
+  const m = creases.filter(c => c.type === 'mountain').length;
+  const v = creases.filter(c => c.type === 'valley').length;
+  document.getElementById('count-m').textContent = m;
+  document.getElementById('count-v').textContent = v;
+  document.getElementById('count-t').textContent = creases.length;
+}
+
+function clearAll() {
+  creases = [];
+  creasesG.innerHTML = '';
+  selectedId = null;
+  updateCounts();
+  stopAnimation();
+}
+
+function setTool(t) {
+  tool = t;
+  document.getElementById('btn-mountain').className =
+    'tool-btn px-3 py-2 rounded-lg text-sm font-medium transition-colors border-2 ' +
+    (t === 'mountain' ? 'bg-red-700 text-white border-red-400' : 'bg-gray-700 text-gray-300 border-transparent');
+  document.getElementById('btn-valley').className =
+    'tool-btn px-3 py-2 rounded-lg text-sm font-medium transition-colors border-2 ' +
+    (t === 'valley' ? 'bg-blue-700 text-white border-blue-400' : 'bg-gray-700 text-gray-300 border-transparent');
+}
+
+function setMode(m) {
+  editMode = m;
+  svg.className.baseVal = m === 'select' ? 'select-mode' : '';
+  document.getElementById('btn-draw').className =
+    'px-3 py-2 rounded-lg text-sm font-medium transition-colors border-2 ' +
+    (m === 'draw' ? 'bg-cyan-700 text-white border-cyan-400' : 'bg-gray-700 text-gray-300 border-transparent');
+  document.getElementById('btn-select').className =
+    'px-3 py-2 rounded-lg text-sm font-medium transition-colors border-2 ' +
+    (m === 'select' ? 'bg-yellow-700 text-white border-yellow-400' : 'bg-gray-700 text-gray-300 border-transparent');
+}
+
+// Animation: show creases one by one
+function animateSteps() {
+  stopAnimation();
+  if (creases.length === 0) return;
+  creasesG.innerHTML = '';
+  let step = 0;
+  document.getElementById('anim-status').textContent = `Step 1 / ${creases.length}`;
+
+  function showNext() {
+    if (step >= creases.length) {
+      document.getElementById('anim-status').textContent = 'Done';
+      animTimer = null;
+      return;
+    }
+    const c = creases[step];
+    renderCrease(c, true);
+    setTimeout(() => {
+      const el = document.getElementById('crease-' + c.id);
+      if (el) el.classList.remove('crease-highlight');
+    }, 300);
+    step++;
+    document.getElementById('anim-status').textContent = `Step ${step} / ${creases.length}`;
+    animTimer = setTimeout(showNext, 600);
+  }
+  showNext();
+}
+
+function stopAnimation() {
+  if (animTimer) { clearTimeout(animTimer); animTimer = null; }
+  // Restore all
+  creasesG.innerHTML = '';
+  creases.forEach(c => renderCrease(c));
+  document.getElementById('anim-status').textContent = 'Idle';
+}
+
+// Crane CP preset (simplified traditional crane crease pattern)
+function loadCrane() {
+  clearAll();
+  tool = 'mountain';
+  const M = MARGIN, S = SIZE;
+  // Center point
+  const cx = M + S / 2, cy = M + S / 2;
+
+  const craneLines = [
+    // Main diagonals (mountain)
+    [M, M, M+S, M+S, 'mountain'],
+    [M+S, M, M, M+S, 'mountain'],
+    // Horizontal/vertical center (valley)
+    [M, cy, M+S, cy, 'valley'],
+    [cx, M, cx, M+S, 'valley'],
+    // Bird base folds
+    [M, M, cx, cy, 'valley'],
+    [M+S, M, cx, cy, 'valley'],
+    [M, M+S, cx, cy, 'valley'],
+    [M+S, M+S, cx, cy, 'valley'],
+    // Quarter diagonals (mountain)
+    [M, cy, cx, M, 'mountain'],
+    [M+S, cy, cx, M, 'mountain'],
+    [M, cy, cx, M+S, 'mountain'],
+    [M+S, cy, cx, M+S, 'mountain'],
+    // Petal folds (valley)
+    [cx, M, M+S/4, cy, 'valley'],
+    [cx, M, M+S*3/4, cy, 'valley'],
+    [cx, M+S, M+S/4, cy, 'valley'],
+    [cx, M+S, M+S*3/4, cy, 'valley'],
+    // Inner square (valley)
+    [M+S/4, cy, cx, M+S/4, 'valley'],
+    [M+S*3/4, cy, cx, M+S/4, 'valley'],
+    [M+S/4, cy, cx, M+S*3/4, 'valley'],
+    [M+S*3/4, cy, cx, M+S*3/4, 'valley'],
+  ];
+
+  craneLines.forEach(([x1,y1,x2,y2,t]) => addCrease(x1,y1,x2,y2,t));
+}
+
+// Download SVG
+function downloadSVG() {
+  const clone = svg.cloneNode(true);
+  // Remove snap dots from download
+  const dots = clone.querySelector('#snap-dots');
+  if (dots) dots.innerHTML = '';
+  const preview = clone.querySelector('#preview-line');
+  if (preview) preview.setAttribute('opacity', '0');
+
+  const serializer = new XMLSerializer();
+  const str = '<?xml version="1.0" encoding="UTF-8"?>\n' + serializer.serializeToString(clone);
+  const blob = new Blob([str], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'crease-pattern.svg';
+  a.click();
+}
+</script>
+</body>
+</html>
